@@ -1,0 +1,17 @@
+# Local / generated
+config/env
+results/**
+!results/.gitkeep
+
+# Secrets / credentials
+*.kubeconfig
+**/kubeadmin-password
+**/pull-secret*
+**/*secret*
+!**/env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
