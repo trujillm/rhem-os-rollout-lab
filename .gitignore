@@ -15,3 +15,8 @@ results/**
 *.swp
 .idea/
 .vscode/
+
+# Agent / SDD scratch (local only — not lab deliverables)
+.superpowers/
+docs/superpowers/
+docs/HANDOFF*
