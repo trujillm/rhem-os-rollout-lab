@@ -122,22 +122,28 @@ install_device_pull_auth() {
 # Thin A′ layer: FROM current good + visible marker file. Uses ephemeral cluster buildah
 # (same pattern as scripts/10-build-images.sh BUILD_MODE=cluster). Pushes :good (new digest).
 build_aprime() {
-  local ns="os-rollout-aprime" marker tag_ref digest
+  local ns="os-rollout-aprime" marker tag_ref digest digest_before
   marker="A-PRIME-$(ts)"
   tag_ref="$OS_IMAGE_GOOD"
   echo "building A′ marker bump ($marker) via cluster buildah → $tag_ref"
+
+  digest_before="$(digest_of_ref "$tag_ref")"
 
   cleanup_aprime() { oc delete namespace "$ns" --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
   trap cleanup_aprime EXIT
 
   oc delete namespace "$ns" --ignore-not-found --wait=true >/dev/null 2>&1 || true
-  oc create namespace "$ns"
-  oc adm policy add-scc-to-user privileged -z default -n "$ns" >/dev/null
-  oc create secret generic registry-auth -n "$ns" --from-file="auth.json=$AUTHFILE"
+  oc create namespace "$ns" || die "oc create namespace $ns failed"
+  oc adm policy add-scc-to-user privileged -z default -n "$ns" >/dev/null \
+    || die "oc adm policy add-scc-to-user failed in $ns"
+  oc create secret generic registry-auth -n "$ns" --from-file="auth.json=$AUTHFILE" \
+    || die "oc create secret registry-auth failed in $ns"
 
   oc run buildah --image=quay.io/buildah/stable -n "$ns" \
-    --overrides='{"spec":{"securityContext":{"runAsUser":0},"containers":[{"name":"buildah","image":"quay.io/buildah/stable","command":["sleep","infinity"],"securityContext":{"privileged":true},"volumeMounts":[{"name":"regauth","mountPath":"/run/secrets/registry"}]}],"volumes":[{"name":"regauth","secret":{"secretName":"registry-auth"}}]}}'
-  oc wait --for=condition=Ready pod/buildah -n "$ns" --timeout=180s
+    --overrides='{"spec":{"securityContext":{"runAsUser":0},"containers":[{"name":"buildah","image":"quay.io/buildah/stable","command":["sleep","infinity"],"securityContext":{"privileged":true},"volumeMounts":[{"name":"regauth","mountPath":"/run/secrets/registry"}]}],"volumes":[{"name":"regauth","secret":{"secretName":"registry-auth"}}]}}' \
+    || die "oc run buildah failed in $ns"
+  oc wait --for=condition=Ready pod/buildah -n "$ns" --timeout=180s \
+    || die "buildah pod did not become Ready in $ns"
 
   # Env BASE/TAG/MARKER expand inside the remote bash -c (heredoc is single-quoted).
   local remote_script
@@ -154,9 +160,12 @@ buildah rm "$CTR" >/dev/null
 REMOTE
 )"
   oc exec -n "$ns" buildah -- env "BASE=$tag_ref" "TAG=$tag_ref" "MARKER=$marker" \
-    bash -c "$remote_script"
+    bash -c "$remote_script" || die "cluster buildah A′ build/push failed in $ns"
 
   digest="$(digest_of_ref "$tag_ref")"
+  if [[ "$digest" == "$digest_before" ]]; then
+    die "A′ build did not change $tag_ref digest (still $digest)"
+  fi
   echo "A′ pushed: $tag_ref@$digest (marker=$marker)" | tee "$OUT/aprime.txt"
   TARGET_REF="$(repo_of "$tag_ref")@${digest}"
   TARGET_DIGEST="$digest"
@@ -403,7 +412,17 @@ main() {
     local after_bootc after_marker
     after_bootc="$(booted_digest)"
     after_marker="$(remote_sudo 'test -f /etc/rhem-os-rollout-test/A-PRIME && cat /etc/rhem-os-rollout-test/A-PRIME || echo none')"
+    after_marker="${after_marker//$'\r'/}"
+    after_marker="${after_marker//$'\n'/}"
     if [[ "$after_bootc" == "$TARGET_DIGEST" ]]; then
+      if [[ "$TARGET_KIND" == "A-prime" ]]; then
+        [[ -n "${A_PRIME_MARKER:-}" ]] || die "A-prime target missing A_PRIME_MARKER"
+        if [[ "$after_marker" != "$A_PRIME_MARKER" ]]; then
+          write_verdict FAIL "A-prime marker mismatch: device=$after_marker expected=$A_PRIME_MARKER"
+          echo "evidence: $OUT"
+          exit 1
+        fi
+      fi
       write_verdict PASS "device Online+UpToDate on $TARGET_DIGEST; bootc agrees (kind=$TARGET_KIND marker=${after_marker})"
       echo "evidence: $OUT"
       exit 0
