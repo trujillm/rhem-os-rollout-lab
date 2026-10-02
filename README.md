@@ -4,9 +4,25 @@ Lean AWS lab to validate **RHEM / flightctl OS image rollout and recovery** (boo
 
 **Design:** [docs/design.md](docs/design.md)
 
+**Implementation plan:** [docs/superpowers/plans/2026-10-01-rhem-os-rollout-lab.md](docs/superpowers/plans/2026-10-01-rhem-os-rollout-lab.md)
+
+## Make workflow
+
+Copy `config/env.example` to `config/env` and fill in operator values (never commit `config/env`).
+
+Run lab steps via the root `Makefile`, for example:
+
+```bash
+make prerequisites   # after scripts exist
+make install-rhem
+make build-images
+```
+
+Target order and gates are defined in the design doc and implementation plan above.
+
 ## Status
 
-Design approved. Implementation harness (Makefile, scripts, images, Fleet) comes next.
+Scaffold (config, `scripts/lib.sh`, Makefile) in place; scripts, images, and Fleet follow the plan.
 
 ## What this is / is not
 
