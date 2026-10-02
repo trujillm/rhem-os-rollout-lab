@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Late-bind enrollment config onto the EC2 bootc device, approve the enrollment
-# request with fleet=os-rollout-test, and apply the Fleet pinned to the currently
-# booted digest (no OS change yet).
+# request with fleet=os-rollout-test, and apply the Fleet without os.image
+# (digest pin deferred to Test 1 to avoid Quay unauthorized/OutOfDate).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

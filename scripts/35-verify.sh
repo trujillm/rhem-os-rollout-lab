@@ -47,7 +47,7 @@ resolve_device() {
     return 0
   fi
   local alias="${DEVICE_ALIAS:-$DEVICE_NAME}"
-  flightctl get devices -o json | python3 -c '
+  flightctl get devices -o json | ALIAS="$alias" python3 -c '
 import json,sys,os
 alias=os.environ["ALIAS"]
 d=json.load(sys.stdin)
@@ -55,7 +55,7 @@ for it in d.get("items") or []:
   labels=((it.get("metadata") or {}).get("labels") or {})
   if labels.get("alias")==alias or labels.get("fleet")=="os-rollout-test":
     print(it["metadata"]["name"]); break
-' ALIAS="$alias"
+'
 }
 
 main() {
