@@ -1,0 +1,31 @@
+global:
+  enableOpenShiftExtensions: "true"
+  enableMulticlusterExtensions: "false"
+  generateCertificates: "builtin"
+  routeExternalCertificate: "false"
+  exposeServicesMethod: "route"
+  baseDomain: flightctl.apps.matrujil-rhem.kni.syseng.devcluster.openshift.com
+  storageClassName: gp3-csi
+  auth:
+    type: "openshift"
+    insecureSkipTlsVerify: true
+    openshift:
+      createAdminUser: true
+      authorizationUrl: https://oauth-openshift.apps.matrujil-rhem.kni.syseng.devcluster.openshift.com/oauth/authorize
+      tokenUrl: https://oauth-openshift.apps.matrujil-rhem.kni.syseng.devcluster.openshift.com/oauth/token
+ui:
+  enabled: true
+  auth:
+    insecureSkipTlsVerify: true
+clusterCli:
+  image:
+    image: registry.redhat.io/openshift4/ose-cli-rhel9
+    tag: "v4.22"
+imageBuilderApi:
+  enabled: false
+imageBuilderWorker:
+  enabled: false
+upgradeHooks:
+  databaseMigrationDryRun: false
+  scaleDown:
+    condition: never
