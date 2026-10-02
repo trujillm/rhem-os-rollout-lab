@@ -1,0 +1,92 @@
+# This project was developed with assistance from AI tools.
+#
+# Image A (known-good) for the RHEM OS-rollout lab (docs/design.md). A RHEL image-mode (bootc)
+# image carrying the flightctl agent plus greenboot, so that Test 2 (health failure + rollback)
+# has something real to roll back to. Pattern lifted from the hp-roscon-flywheel Fury fleet image
+# (tools/host/fury/fleet/Containerfile — agent pin/signature verification, timer mask) with one
+# deliberate difference: that image omits greenboot entirely ("no weak dependencies: greenboot
+# would reboot and roll back a device on a failed health check, mid-demo"). Here greenboot/
+# flightctl-greenboot are the point, not a risk to avoid — see docs/design.md "Why not Fury".
+#
+# greenboot and greenboot-default-health-checks are RHEL AppStream packages, not in the vendored
+# flightctl repo. They require an entitled build host (subscription-manager register, or OpenShift's
+# managed entitlement secret/certs mounted at /etc/pki/entitlement — see scripts/10-build-images.sh
+# build_cluster(), the path this lab actually used). flightctl-greenboot ships from the SAME
+# flightctl repo as the agent and, as of 1.3.0, is a hard dependency of flightctl-agent itself
+# (`rpm -q --requires flightctl-agent` lists flightctl-greenboot; confirmed against
+# https://rpm.flightctl.io/epel/10/x86_64/repodata/ on 2026-10-02), which in turn requires
+# `greenboot`. One dnf transaction below installs all three correctly ordered.
+ARG BASE=registry.redhat.io/rhel10/rhel-bootc:10.2
+FROM ${BASE}
+ARG AGENT_VER=1.3.0-1.el10
+# flightctl-greenboot ships from the flightctl repo (not RHEL AppStream) and is versioned
+# alongside the agent; 1.3.0-1.el10 is the matching build (confirmed in repo metadata, 2026-10-02).
+ARG FLIGHTCTL_GREENBOOT_VER=1.3.0-1.el10
+
+# Agent provenance: same three-way pin as the flywheel image (key bytes, imported key id, package
+# signature) — see that Containerfile's comment for the full rationale. Key fingerprint
+# AB7A FBCB AAB5 B4EA 1554 2BBA 2AC4 5CAD 374E BF59, Fedora COPR's @redhat-et/flightctl key.
+COPY flightctl.repo /etc/yum.repos.d/flightctl.repo
+COPY RPM-GPG-KEY-flightctl /etc/pki/rpm-gpg/RPM-GPG-KEY-flightctl
+RUN echo "b0ba76f5f0d9b93b5d2e63255feab1556fd735d0c25fdc651aba2bd621717177 /etc/pki/rpm-gpg/RPM-GPG-KEY-flightctl" | sha256sum -c - && \
+    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-flightctl && \
+    rpm -q gpg-pubkey-374ebf59-65c39893
+
+# The entitled AppStream repo exists only for this RUN step: buildah/podman `--secret` mounts
+# (BuildKit-style, supported since podman/buildah 1.27+) place the client cert/key at these paths
+# only while this instruction runs — they are never written into an image layer. The CA
+# (redhat-uep.pem) ships in the base image already (subscription-manager-rhsm-certificates), so
+# only the two entitlement files need mounting. Invoke with:
+#   podman build --secret id=entitlement_cert,src=<cert>.pem --secret id=entitlement_key,src=<key>.pem ...
+# (see scripts/10-build-images.sh). Without those secrets this RUN fails fast with "no enabled
+# repositories" / "not registered with an entitlement server" — confirmed against this base image
+# on 2026-10-02 (unauthenticated `dnf install greenboot` inside it).
+RUN --mount=type=secret,id=entitlement_cert,target=/etc/pki/entitlement/entitlement.pem \
+    --mount=type=secret,id=entitlement_key,target=/etc/pki/entitlement/entitlement-key.pem \
+    set -e; \
+    printf '%s\n' \
+      '[rhel-10-appstream-x86_64]' \
+      'name=Red Hat Enterprise Linux 10 for x86_64 - AppStream (RPMs)' \
+      'baseurl=https://cdn.redhat.com/content/dist/rhel10/10/x86_64/appstream/os' \
+      'enabled=1' \
+      'gpgcheck=1' \
+      'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release' \
+      'sslverify=1' \
+      'sslcacert=/etc/rhsm/ca/redhat-uep.pem' \
+      'sslclientcert=/etc/pki/entitlement/entitlement.pem' \
+      'sslclientkey=/etc/pki/entitlement/entitlement-key.pem' \
+      > /etc/yum.repos.d/rhel-appstream-entitled.repo; \
+    trap 'rm -f /etc/yum.repos.d/rhel-appstream-entitled.repo' EXIT; \
+    # greenboot itself is unversioned here: it is a RHEL AppStream package with its own release
+    # cadence, independent of the flightctl agent version — do not conflate the two.
+    dnf -y install --setopt=install_weak_deps=False greenboot; \
+    dnf -y install --setopt=install_weak_deps=False greenboot-default-health-checks || \
+      echo "greenboot-default-health-checks: not available in rhel-10-appstream-x86_64 - skipping (best effort, task-6 brief)" >&2; \
+    dnf -y install --enablerepo=flightctl --setopt=flightctl.gpgcheck=1 --setopt=install_weak_deps=False \
+      "flightctl-agent-${AGENT_VER}" "flightctl-greenboot-${FLIGHTCTL_GREENBOOT_VER}"
+
+RUN dnf -y clean all && \
+    test "$(rpm -q --qf '%{VERSION}-%{RELEASE}' flightctl-agent)" = "${AGENT_VER}" && \
+    rpm -q greenboot flightctl-greenboot && \
+    { rpm -q --qf '%{RSAHEADER:pgpsig}\n' flightctl-agent flightctl-selinux flightctl-greenboot | tee /dev/stderr | \
+      grep -ci 'key id 2ac45cad374ebf59' | grep -qx 3 || \
+      { echo "flightctl-agent, flightctl-selinux and flightctl-greenboot are not ALL signed by the pinned key (lines above) - stop and find out why" >&2; exit 1; }; }
+
+# RHEM is what updates these devices (Fleet -> flightctl-agent -> bootc), so RHEL's own automatic
+# image-update timer is masked, same as the flywheel image. greenboot's own units are enabled by
+# its RPM post scripts — nothing to do here for that.
+RUN systemctl enable flightctl-agent.service && \
+    systemctl mask bootc-fetch-apply-updates.timer
+
+# Lineage marker for Test 1/evidence (docs/design.md, scripts/60-collect-evidence.sh
+# lab-markers.txt). No FAIL marker and no required.d check in this image — see Containerfile.bad.
+RUN mkdir -p /etc/rhem-os-rollout-test && \
+    touch /etc/rhem-os-rollout-test/GOOD
+
+# Same per-device-state guard as the flywheel image: fail the build rather than ship a shared
+# machine-id, ssh host key, or agent identity baked into every device cloned from this image.
+RUN { test ! -s /etc/machine-id || grep -qx uninitialized /etc/machine-id; } && \
+    ! ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1 && \
+    test ! -e /var/lib/flightctl/certs/agent.key && test ! -e /etc/flightctl/certs/agent.key && \
+    test ! -e /etc/flightctl/config.yaml && \
+    bootc container lint

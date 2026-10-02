@@ -1,0 +1,15 @@
+# This project was developed with assistance from AI tools.
+#
+# The flightctl project's RPM repository, vendored instead of fetched at build time. Identical to
+# https://rpm.flightctl.io/flightctl-epel10.repo as served on 2026-09-20 (sha256 c4ae28bc...0841) except for two
+# lines: gpgkey points at the key file next to this one instead of a URL trusted on first use at every build,
+# and the repository is disabled (the agent is pinned; the Containerfile enables it for one install).
+[flightctl]
+name=Flight Control RPM Repository (EPEL)
+type=rpm-md
+baseurl=https://rpm.flightctl.io/epel/$releasever_major/$basearch/
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-flightctl
+enabled=0
+enabled_metadata=1
+metadata_expire=1d

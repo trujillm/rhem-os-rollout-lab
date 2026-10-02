@@ -1,0 +1,17 @@
+# This project was developed with assistance from AI tools.
+#
+# Image B (controlled-fail) for Test 2 (docs/design.md). Same lineage as image A: built FROM the
+# already-pushed good image (by tag or, preferably, by digest — see scripts/10-build-images.sh,
+# which passes --build-arg BASE="${OS_IMAGE_REPO}@<good-digest>" once A is pushed), plus one
+# greenboot required check that fails deterministically. No new agent install, no new entitled
+# dnf transaction — just the fail marker and the check script.
+ARG BASE=quay.io/matrujil/rhem-os-rollout-lab:good
+FROM ${BASE}
+
+COPY greenboot/99-rhem-os-rollout-fail.sh /etc/greenboot/check/required.d/99-rhem-os-rollout-fail.sh
+
+RUN mkdir -p /etc/rhem-os-rollout-test && \
+    touch /etc/rhem-os-rollout-test/FAIL && \
+    chmod 755 /etc/greenboot/check/required.d/99-rhem-os-rollout-fail.sh
+
+RUN bootc container lint
