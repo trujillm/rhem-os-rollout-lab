@@ -228,6 +228,13 @@ feasibility_probe() {
   local probe_path="/etc/greenboot/check/required.d/${PROBE_SCRIPT_NAME}"
   mkdir -p "$OUT/probe"
 
+  cleanup_probe() {
+    remote_sudo "rm -f $probe_path" 2>/dev/null || true
+    remote_sudo "if test -f ${conf}.task10-probe.bak; then mv -f ${conf}.task10-probe.bak $conf; fi" \
+      2>/dev/null || true
+  }
+  trap cleanup_probe EXIT
+
   remote_sudo "cat $conf" >"$OUT/probe/greenboot-conf-before.txt" 2>&1 || true
   remote_sudo "cp -a $conf ${conf}.task10-probe.bak"
   remote_sudo "printf '#!/bin/bash\nexit 0\n' > $probe_path && chmod 755 $probe_path"
@@ -238,9 +245,8 @@ feasibility_probe() {
   remote_sudo "cat $conf" >"$OUT/probe/greenboot-conf-after.txt" 2>&1 || true
   remote_sudo "ls -la /etc/greenboot/check/required.d/" >"$OUT/probe/required-d-listing.txt" 2>&1 || true
 
-  # Clean up regardless of outcome: remove probe script, restore original conf.
-  remote_sudo "rm -f $probe_path"
-  remote_sudo "mv -f ${conf}.task10-probe.bak $conf"
+  cleanup_probe
+  trap - EXIT
   remote_sudo "cat $conf" >"$OUT/probe/greenboot-conf-restored.txt" 2>&1 || true
 
   if grep -q "$PROBE_SCRIPT_NAME" "$OUT/probe/greenboot-conf-after.txt" 2>/dev/null; then
@@ -254,6 +260,31 @@ feasibility_probe() {
 # Expect bootc/greenboot to auto-rollback the booted deployment to the pre-failure digest (A)
 # after image B's greenboot required check fails; "max boots" = greenboot.conf's
 # GREENBOOT_MAX_BOOT_ATTEMPTS, enforced by greenboot itself, not by this script.
+#
+# Design §7 PASS also requires RHEM to report distinct non-success for the B attempt (RHEM 1.3
+# live enums: status.updated.status and status.os.imageDigest from flightctl get device -o json).
+rhem_reports_b_non_success() {
+  local updated="${HUB_UPDATED_AT_ROLLBACK:-}"
+  local osdig="${HUB_OSDIG_AT_ROLLBACK:-}"
+  if [[ -z "$updated" ]]; then
+    echo "missing hub status.updated.status at rollback detection"
+    return 1
+  fi
+  if [[ "$updated" == "UpToDate" ]]; then
+    echo "hub updated.status=UpToDate (expected OutOfDate while fleet still targets B after rollback)"
+    return 1
+  fi
+  if [[ "$updated" != "OutOfDate" ]]; then
+    echo "hub updated.status=$updated (expected OutOfDate on this RHEM 1.3 build)"
+    return 1
+  fi
+  if [[ -n "$TARGET_DIGEST" && -n "$osdig" && "$osdig" == "$TARGET_DIGEST" ]]; then
+    echo "hub os.imageDigest still reports B ($TARGET_DIGEST) despite bootc rollback to A"
+    return 1
+  fi
+  return 0
+}
+
 wait_for_rollback() {
   local deadline=$((SECONDS + ROLLOUT_TIMEOUT_SEC))
   local poll=0
@@ -276,8 +307,11 @@ wait_for_rollback() {
     echo "[poll $poll $(ts)] hub: summary=$summary updated=$updated os.digest=$osdig info=$uinfo | bootc.booted=$bootc_dig" \
       | tee -a "$OUT/poll.log"
     if [[ "$bootc_dig" == "$PRE_FAILURE_DIGEST" ]]; then
-      HUB_INFO_AT_ROLLBACK="updated.info=$uinfo summary.info=$sinfo"
-      echo "[poll $poll] bootc rolled back to pre-failure digest" | tee -a "$OUT/poll.log"
+      HUB_SUMMARY_AT_ROLLBACK="$summary"
+      HUB_UPDATED_AT_ROLLBACK="$updated"
+      HUB_OSDIG_AT_ROLLBACK="$osdig"
+      HUB_INFO_AT_ROLLBACK="updated.status=$updated summary.status=$summary os.imageDigest=$osdig updated.info=$uinfo summary.info=$sinfo"
+      echo "[poll $poll] bootc rolled back to pre-failure digest; hub $HUB_INFO_AT_ROLLBACK" | tee -a "$OUT/poll.log"
       return 0
     fi
     sleep "$POLL_INTERVAL_SEC"
@@ -370,7 +404,13 @@ main() {
     local after_bootc
     after_bootc="$(booted_digest)"
     if [[ "$after_bootc" == "$PRE_FAILURE_DIGEST" ]]; then
-      write_verdict PASS "auto-rollback to pre-failure digest $PRE_FAILURE_DIGEST after greenboot failure on B ($TARGET_DIGEST); hub ${HUB_INFO_AT_ROLLBACK:-}"
+      local rhem_gate_msg
+      if ! rhem_gate_msg="$(rhem_reports_b_non_success)"; then
+        write_verdict FAIL "bootc rolled back to $PRE_FAILURE_DIGEST but RHEM did not report distinct non-success for B: $rhem_gate_msg (${HUB_INFO_AT_ROLLBACK:-})"
+        echo "evidence: $OUT"
+        exit 1
+      fi
+      write_verdict PASS "auto-rollback to pre-failure digest $PRE_FAILURE_DIGEST after greenboot failure on B ($TARGET_DIGEST); RHEM non-success for B: $rhem_gate_msg; hub ${HUB_INFO_AT_ROLLBACK:-}"
       echo "evidence: $OUT"
       exit 0
     fi
