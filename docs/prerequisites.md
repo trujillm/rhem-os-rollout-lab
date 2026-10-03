@@ -1,6 +1,6 @@
 # Prerequisites (P1–P19)
 
-Updated 2026-10-02 after Task 8 enroll/verify (evidence: `results/baseline-20261002T183027Z/`). Earlier rows also refreshed from live hub/device state.
+Updated 2026-10-02 after Task 8 enroll/verify (evidence: `results/baseline-20261002T183027Z/`). Earlier rows also refreshed from live hub/device state. P18 updated 2026-10-03 after Task 10's live Test 2 feasibility probe (evidence: `results/test2-20261003T005840Z/`).
 
 **Worker capacity:** The default IPI worker profile (`m6i.large` ×2) is too small for the full RHEM chart; `flightctl-kv` needs roughly **m6i.xlarge** headroom on at least one worker. See [hub/README.md](../hub/README.md).
 
@@ -23,7 +23,7 @@ Updated 2026-10-02 after Task 8 enroll/verify (evidence: `results/baseline-20261
 | P15 | Device enrolled (`fleet=os-rollout-test`) | Pass | alias `os-rollout-test-01`; metadata.name is agent-generated hash (RHEM 1.3); labels `fleet=os-rollout-test,alias=os-rollout-test-01`; owner `Fleet/os-rollout-test` |
 | P16 | Device Online in RHEM | Pass | `status.summary.status=Online`, `updated=UpToDate` |
 | P17 | bootc image-mode on device (image A) | Pass | booted `quay.io/matrujil/rhem-os-rollout-lab:good` @ `sha256:5ba1080134020a6d1d4cf0166b502ccd67f978b1d4febbc31afce2a3d7439eee` |
-| P18 | greenboot / Test 2 feasibility on device | Pass | `greenboot-0.16.3`, `flightctl-greenboot-1.3.0` installed; inducing failure still gated to Task 10 |
+| P18 | greenboot / Test 2 feasibility on device | **Blocked** | `greenboot-0.16.3`, `flightctl-greenboot-1.3.0` installed and wired (healthcheck/rollback-trigger units enabled), but live probe (`scripts/50-rollout-failure.sh`) shows `flightctl-configure-greenboot.service` disables any custom `/etc\|usr/lib/greenboot/check/required.d` script not matching `*flightctl*` (via `DISABLED_HEALTHCHECKS` in `greenboot.conf`) **before** `greenboot-healthcheck.service` runs. Image B's custom fail check would never execute. Test 2 gate = BLOCKED; Fleet not pointed at B. See `docs/test2-notes.md`. |
 | P19 | Recovery runbook present | Pass | [config/recovery-runbook.md](../config/recovery-runbook.md) |
 
 **Enroll notes (Task 8):** Late-bind `/etc/flightctl/config.yaml` via `flightctl certificate request --output=embedded`, approve with `-l fleet=os-rollout-test -l alias=…`. Fleet is applied **without** `os.image` at enroll — digest-pinning the private Quay repo triggers an unauthorized prefetch and OutOfDate; Test 1 will set `os.image` once pull credentials are in place.
