@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-01  
 **Repo:** [trujillm/rhem-os-rollout-lab](https://github.com/trujillm/rhem-os-rollout-lab) (public)  
-**Status:** Approved in design review; implementation plan ready
+**Status:** Implemented/Executed — Test 1 PASS, Test 2 BLOCKED (feasibility gate), restore script ready (not yet run). See `docs/result.md`.
 
 ## 1. Goal
 
