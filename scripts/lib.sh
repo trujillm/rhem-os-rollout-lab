@@ -40,3 +40,27 @@ update_env() {
   fi
   export "$key=$value"
 }
+
+# resolve_device — print RHEM device metadata.name for this lab device.
+# Prefers exact DEVICE_NAME; falls back to label match on alias, then fleet.
+# Requires flightctl session + DEVICE_NAME + FLEET_NAME (DEVICE_ALIAS optional).
+resolve_device() {
+  require_env DEVICE_NAME FLEET_NAME
+  if flightctl get "device/${DEVICE_NAME}" -o name >/dev/null 2>&1; then
+    echo "$DEVICE_NAME"
+    return 0
+  fi
+  local alias="${DEVICE_ALIAS:-$DEVICE_NAME}"
+  flightctl get devices -o json \
+    | ALIAS="$alias" FLEET_NAME="$FLEET_NAME" python3 -c '
+import json, sys, os
+alias = os.environ.get("ALIAS", "")
+fleet = os.environ["FLEET_NAME"]
+data = json.load(sys.stdin)
+for it in data.get("items") or []:
+    labels = ((it.get("metadata") or {}).get("labels") or {})
+    if (alias and labels.get("alias") == alias) or labels.get("fleet") == fleet:
+        print(it["metadata"]["name"])
+        break
+'
+}

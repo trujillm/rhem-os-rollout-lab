@@ -52,23 +52,6 @@ remote_sudo() {
   printf '%s\n' "$EC2_SSH_PASSWORD" | ssh_base "$DEVICE_SSH" "sudo -S bash -lc $(printf '%q' "$cmd")" 2>/dev/null
 }
 
-resolve_device() {
-  if flightctl get "device/${DEVICE_NAME}" -o name >/dev/null 2>&1; then
-    echo "$DEVICE_NAME"
-    return 0
-  fi
-  local alias="${DEVICE_ALIAS:-$DEVICE_NAME}"
-  flightctl get devices -o json | ALIAS="$alias" python3 -c '
-import json,sys,os
-alias=os.environ["ALIAS"]
-d=json.load(sys.stdin)
-for it in d.get("items") or []:
-  labels=((it.get("metadata") or {}).get("labels") or {})
-  if labels.get("alias")==alias or labels.get("fleet")=="os-rollout-test":
-    print(it["metadata"]["name"]); break
-'
-}
-
 booted_digest() {
   local json
   json="$(remote_sudo 'bootc status --format=json 2>/dev/null || bootc status --json 2>/dev/null')"

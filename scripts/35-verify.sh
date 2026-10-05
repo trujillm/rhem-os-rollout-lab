@@ -40,24 +40,6 @@ remote_sudo() {
   printf '%s\n' "$EC2_SSH_PASSWORD" | ssh_base "$DEVICE_SSH" "sudo -S bash -lc $(printf '%q' "$cmd")" 2>/dev/null
 }
 
-resolve_device() {
-  # Prefer exact metadata.name (post-enroll DEVICE_NAME). Fall back to alias lookup.
-  if flightctl get "device/${DEVICE_NAME}" -o name >/dev/null 2>&1; then
-    echo "$DEVICE_NAME"
-    return 0
-  fi
-  local alias="${DEVICE_ALIAS:-$DEVICE_NAME}"
-  flightctl get devices -o json | ALIAS="$alias" python3 -c '
-import json,sys,os
-alias=os.environ["ALIAS"]
-d=json.load(sys.stdin)
-for it in d.get("items") or []:
-  labels=((it.get("metadata") or {}).get("labels") or {})
-  if labels.get("alias")==alias or labels.get("fleet")=="os-rollout-test":
-    print(it["metadata"]["name"]); break
-'
-}
-
 main() {
   load_env
   require_env KUBECONFIG FLIGHTCTL_API FLIGHTCTL_AGENT_API DEVICE_NAME DEVICE_SSH \
@@ -118,11 +100,11 @@ print(((d.get("metadata") or {}).get("owner")) or "")
   else
     echo "PASS: device Online" | tee -a "$OUT/verify.txt"
   fi
-  if [[ "$labels" != *"fleet=os-rollout-test"* ]]; then
-    echo "FAIL: missing fleet=os-rollout-test label (labels=$labels)" | tee -a "$OUT/verify.txt"
+  if [[ "$labels" != *"fleet=${FLEET_NAME}"* ]]; then
+    echo "FAIL: missing fleet=${FLEET_NAME} label (labels=$labels)" | tee -a "$OUT/verify.txt"
     fail=1
   else
-    echo "PASS: fleet=os-rollout-test label present" | tee -a "$OUT/verify.txt"
+    echo "PASS: fleet=${FLEET_NAME} label present" | tee -a "$OUT/verify.txt"
   fi
 
   # Device SSH probes

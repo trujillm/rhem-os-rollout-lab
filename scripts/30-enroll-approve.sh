@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Late-bind enrollment config onto the EC2 bootc device, approve the enrollment
-# request with fleet=os-rollout-test, and apply the Fleet without os.image
+# request with fleet=${FLEET_NAME}, and apply the Fleet without os.image
 # (digest pin deferred to Test 1 to avoid Quay unauthorized/OutOfDate).
 set -euo pipefail
 
@@ -9,7 +9,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/lib.sh"
 
 SSH_KEY_PATH="${HOME}/.ssh/rhem-os-rollout-lab"
-FLEET_LABEL="fleet=os-rollout-test"
 
 oc_bearer_token() {
   local token pwfile api
@@ -143,30 +142,17 @@ if pending:
 
 approve_enrollment() {
   local er_name="$1"
-  echo "approving enrollmentrequest/${er_name} with -l ${FLEET_LABEL} -l alias=${DEVICE_ALIAS}"
+  local fleet_label="fleet=${FLEET_NAME}"
+  echo "approving enrollmentrequest/${er_name} with -l ${fleet_label} -l alias=${DEVICE_ALIAS}"
   flightctl approve "enrollmentrequest/${er_name}" \
-    -l "$FLEET_LABEL" \
+    -l "$fleet_label" \
     -l "alias=${DEVICE_ALIAS}"
-}
-
-find_device_by_alias() {
-  flightctl get devices -o json 2>/dev/null \
-    | DEVICE_ALIAS="$DEVICE_ALIAS" FLEET_NAME="$FLEET_NAME" python3 -c '
-import json,sys,os
-alias=os.environ.get("DEVICE_ALIAS","")
-fleet=os.environ.get("FLEET_NAME","os-rollout-test")
-d=json.load(sys.stdin)
-for it in d.get("items") or []:
-  labels=((it.get("metadata") or {}).get("labels") or {})
-  if (alias and labels.get("alias")==alias) or labels.get("fleet")==fleet:
-    print(it["metadata"]["name"]); break
-' || true
 }
 
 resolve_device_name() {
   local tries=0 name
   while ((tries < 36)); do
-    name="$(find_device_by_alias)"
+    name="$(resolve_device || true)"
     if [[ -n "$name" ]]; then
       echo "$name"
       return 0
@@ -220,7 +206,7 @@ main() {
   flightctl_login
 
   # Idempotent path: already enrolled with fleet label.
-  if existing="$(find_device_by_alias)" && [[ -n "$existing" ]]; then
+  if existing="$(resolve_device || true)" && [[ -n "$existing" ]]; then
     local labs
     labs="$(flightctl get "device/${existing}" -o json | python3 -c '
 import json,sys
